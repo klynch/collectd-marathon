@@ -21,60 +21,78 @@ PREFIX = "marathon"
 MARATHON_HOST = "localhost"
 MARATHON_PORT = 8080
 MARATHON_URL = ""
+MARATHON_INSTANCE = ""
 VERBOSE_LOGGING = False
+
+CONFIGS = []
 
 
 def configure_callback(conf):
     """Received configuration information"""
-    global MARATHON_HOST, MARATHON_PORT, MARATHON_URL, VERBOSE_LOGGING
+    host = MARATHON_HOST
+    port = MARATHON_PORT
+    instance = MARATHON_INSTANCE
+    verbose_logging = VERBOSE_LOGGING
+
     for node in conf.children:
         if node.key == 'Host':
-            MARATHON_HOST = node.values[0]
+            host = node.values[0]
         elif node.key == 'Port':
-            MARATHON_PORT = int(node.values[0])
+            port = int(node.values[0])
         elif node.key == 'Verbose':
-            VERBOSE_LOGGING = bool(node.values[0])
+            verbose_logging = bool(node.values[0])
+        elif node.key == 'Instance':
+            instance = node.values[0]
         else:
             collectd.warning('marathon plugin: Unknown config key: %s.' % node.key)
 
-    MARATHON_URL = "http://" + MARATHON_HOST + ":" + str(MARATHON_PORT) + "/metrics"
+    CONFIGS.append({
+        'host': host,
+        'port': port,
+        'instance': instance,
+        'verbose_logging': verbose_logging,
+        'metrics_url': 'http://' + host + ':' + str(port) + '/metrics'
+    })
 
-    log_verbose('Configured with host=%s, port=%s, url=%s' % (MARATHON_HOST, MARATHON_PORT, MARATHON_URL))
+    log_verbose('Configured marathon host with host=%s, port=%s' % (host, port), verbose_logging)
 
 
 def read_callback():
     """Parse stats response from Marathon"""
-    log_verbose('Read callback called')
-    try:
-        metrics = json.load(urllib2.urlopen(MARATHON_URL, timeout=10))
+    for config in CONFIGS:
+        log_verbose('Read callback called for instance: %s' % config['instance'], config['verbose_logging'])
+        try:
+            metrics = json.load(urllib2.urlopen(config['metrics_url'], timeout=10))
 
-        for group in ['gauges', 'histograms', 'meters', 'timers', 'counters']:
-            for name,values in metrics.get(group, {}).items():
-                for metric, value in values.items():
-                    if not isinstance(value, basestring):
-                        dispatch_stat('gauge', '.'.join((name, metric)), value)
-    except urllib2.URLError as e:
-        collectd.error('marathon plugin: Error connecting to %s - %r' % (MARATHON_URL, e))
+            for group in ['gauges', 'histograms', 'meters', 'timers', 'counters']:
+                for name, values in metrics.get(group, {}).items():
+                    for metric, value in values.items():
+                        if not isinstance(value, basestring):
+                            dispatch_stat('gauge', '.'.join((name, metric)), value, config['instance'], config['verbose_logging'])
+        except urllib2.URLError as e:
+            collectd.error('marathon plugin: Error connecting to %s - %r' % (config['metrics_url'], e))
 
 
-def dispatch_stat(type, name, value):
+def dispatch_stat(type, name, value, instance, verbose_logging):
     """Read a key from info response data and dispatch a value"""
     if value is None:
         collectd.warning('marathon plugin: Value not found for %s' % name)
         return
-    log_verbose('Sending value[%s]: %s=%s' % (type, name, value))
+
+    log_verbose('Sending value[%s]: %s=%s' % (type, name, value), verbose_logging)
 
     val = collectd.Values(plugin='marathon')
     val.type = type
     val.type_instance = name
     val.values = [value]
     # https://github.com/collectd/collectd/issues/716
+    val.plugin_instance = instance
     val.meta = {'0': True}
     val.dispatch()
 
 
-def log_verbose(msg):
-    if not VERBOSE_LOGGING:
+def log_verbose(msg, verbose_logging):
+    if not verbose_logging:
         return
     collectd.info('marathon plugin [verbose]: %s' % msg)
 
