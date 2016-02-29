@@ -16,6 +16,7 @@
 import collectd
 import json
 import urllib2
+import numbers
 
 PREFIX = "marathon"
 MARATHON_HOST = "localhost"
@@ -75,8 +76,8 @@ def read_callback():
 
 def dispatch_stat(type, name, value, instance, verbose_logging):
     """Read a key from info response data and dispatch a value"""
-    if value is None:
-        collectd.warning('marathon plugin: Value not found for %s' % name)
+    if not isinstance(value, numbers.Number):
+        collectd.warning('marathon plugin: incorrect value found for %s' % name)
         return
 
     log_verbose('Sending value[%s]: %s=%s' % (type, name, value), verbose_logging)
