@@ -14,9 +14,9 @@
 # limitations under the License.
 
 import collectd
+import numbers
 import json
 import urllib2
-import numbers
 
 PREFIX = "marathon"
 MARATHON_HOST = "localhost"
